@@ -207,6 +207,32 @@ def PlaneSphereIntersection(plane, sphere_plane, sphere_radius):
         return 1, circle.Plane, circle.Radius
 
 
+def PlaneCircleIntersection(plane, circle_plane, circle_radius):
+    """Calculates the intersection of a plane and a circle
+    Parameters:
+      plane = the plane to intersect
+      circle_plane = plane of the circle. origin of the plane is
+        the center of the circle
+      circle_radius = radius of the circle
+    Returns:
+      intersection type and up to two points:
+          [0, point] for a tangent intersection
+          [1, point1, point2] for a secant intersection
+          [2] if the circle lies in the plane
+      None if there is no intersection or on error
+    """
+    plane = rhutil.coerceplane(plane, True)
+    circle_plane = rhutil.coerceplane(circle_plane, True)
+    circle = Rhino.Geometry.Circle(circle_plane, circle_radius)
+    rc, t1, t2 = Rhino.Geometry.Intersect.Intersection.PlaneCircle(plane, circle)
+    if rc==Rhino.Geometry.Intersect.PlaneCircleIntersection.Tangent:
+        return (0, circle.PointAt(t1))
+    if rc==Rhino.Geometry.Intersect.PlaneCircleIntersection.Secant:
+        return (1, circle.PointAt(t1), circle.PointAt(t2))
+    if rc==Rhino.Geometry.Intersect.PlaneCircleIntersection.Coincident:
+        return (2)
+
+
 def PlaneTransform(plane, xform):
     """Transforms a plane
     Parameters:
