@@ -988,23 +988,24 @@ def ReverseSurface(surface_id, direction):
     brep = rhutil.coercebrep(surface_id, True)
     if not brep.IsSurface: return scriptcontext.errorhandler()
     if direction == 0: return True
+    flipped = brep.Faces[0].OrientationIsReversed
     face = brep.Faces[0].UnderlyingSurface()
     if direction & 1:
         face = face.Reverse(0)
+        flipped = not flipped
         if not face: return False
     if direction & 2:
         face = face.Reverse(1)
+        flipped = not flipped
         if not face: return False
     if direction & 4:
         face = face.Transpose()
+        flipped = not flipped
         if not face: return False
-    newindex = brep.AddSurface(face)
-    if newindex == -1: return scriptcontext.errorhandler()
-    if not brep.Faces[0].ChangeSurface(newindex): return scriptcontext.errorhandler()
-    if not brep.Faces[0].RebuildEdges(scriptcontext.doc.ModelAbsoluteTolerance, False, False):
-        return scriptcontext.errorhandler()
-    brep.CullUnusedSurfaces()
-    scriptcontext.doc.Objects.Replace(surface_id, brep)
+    newbrep = Rhino.Geometry.Brep.TryConvertBrep(face)
+    if not newbrep: return scriptcontext.errorhandler()
+    if flipped: newbrep.Flip()
+    scriptcontext.doc.Objects.Replace(surface_id, newbrep)
     scriptcontext.doc.Views.Redraw()
     return True
 
