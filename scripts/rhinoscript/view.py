@@ -185,9 +185,9 @@ def DetailLock(detail_id, lock=None):
     """
     detail_id = rhutil.coerceguid(detail_id, True)
     detail = scriptcontext.doc.Objects.Find(detail_id)
-    if not detail: return scriptcontext.errohandler()
+    if not detail: return scriptcontext.errorhandler()
     rc = detail.DetailGeometry.IsProjectionLocked
-    if lock and lock!=rc:
+    if lock is not None and lock!=rc:
         detail.DetailGeometry.IsProjectionLocked = lock
         detail.CommitChanges()
     return rc
