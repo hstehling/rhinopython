@@ -251,7 +251,7 @@ def AddInterpCrvOnSrfUV(surface_id, points):
       id of the new curve object if successful
     """
     surface = rhutil.coercesurface(surface_id, True)
-    points = rhutil.coerce2dpointlist(points, True)
+    points = rhutil.coerce2dpointlist(points)
     tolerance = scriptcontext.doc.ModelAbsoluteTolerance
     curve = surface.InterpolatedCurveOnSurfaceUV(points, tolerance)
     if not curve: raise Exception("unable to create InterpolatedCurveOnSurfaceUV")
@@ -338,7 +338,10 @@ def AddNurbsCurve(points, knots, degree, weights=None):
     for i in xrange(cvcount):
         cp = Rhino.Geometry.ControlPoint()
         cp.Location = points[i]
-        if weights: cp.Weight = weights[i]
+        if weights: 
+            cp.Weight = weights[i]
+        else:
+            cp.Weight = 1.0
         nc.Points[i] = cp
     for i in xrange(knotcount): nc.Knots[i] = knots[i]
     rc = scriptcontext.doc.Objects.AddCurve(nc)
@@ -350,10 +353,10 @@ def AddNurbsCurve(points, knots, degree, weights=None):
 def AddPolyline(points, replace_id=None):
     """Adds a polyline curve to the current model
     Parameters:
-      points = list of 3D points. Duplicate, consecutive points found in
-               the array will be removed. The array must contain at least
-               two points. If the array contains less than four points,
-               then the first point and the last point must be different.
+      points = list of 3D points. Duplicate, consecutive points will be
+               removed. The list must contain at least two points. If the
+               list contains less than four points, then the first point and
+               last point must be different.
       replace_id[opt] = If set to the id of an existing object, the object
                will be replaced by this polyline
     Returns:
@@ -362,12 +365,13 @@ def AddPolyline(points, replace_id=None):
     points = rhutil.coerce3dpointlist(points, True)
     if replace_id: replace_id = rhutil.coerceguid(replace_id, True)
     rc = System.Guid.Empty
+    pl = Rhino.Geometry.Polyline(points)
+    pl.DeleteShortSegments(scriptcontext.doc.ModelAbsoluteTolerance)
     if replace_id:
-        pl = Rhino.Geometry.Polyline(points)
         if scriptcontext.doc.Objects.Replace(replace_id, pl):
             rc = replace_id
     else:
-        rc = scriptcontext.doc.Objects.AddPolyline(points)
+        rc = scriptcontext.doc.Objects.AddPolyline(pl)
     if rc==System.Guid.Empty: raise Exception("Unable to add polyline to document")
     scriptcontext.doc.Views.Redraw()
     return rc
@@ -1875,19 +1879,23 @@ def IsArc(curve_id, segment_index=-1):
       True or False
     """
     curve = rhutil.coercecurve(curve_id, segment_index, True)
-    return curve.IsArc()
+    return curve.IsArc() and not curve.IsCircle()
 
 
-def IsCircle(curve_id, segment_index=-1):
+def IsCircle(curve_id, tolerance=None):
     """Verifies an object is a circle curve
     Parameters:
       curve_id = Identifier of the curve object
-      segment_index [opt] = the curve segment if curve_id identifies a polycurve
+      tolerance [opt] = If the curve is not a circle, then the tolerance used
+        to determine whether or not the NURBS form of the curve has the
+        properties of a circle. If omitted, Rhino's internal zero tolerance is used
     Returns:
       True or False
     """
-    curve = rhutil.coercecurve(curve_id, segment_index, True)
-    return curve.IsCircle()
+    curve = rhutil.coercecurve(curve_id, -1, True)
+    if tolerance is None or tolerance < 0:
+        tolerance = Rhino.RhinoMath.ZeroTolerance
+    return curve.IsCircle(tolerance)
 
 
 def IsCurve(object_id):
@@ -1913,8 +1921,8 @@ def IsCurveClosable(curve_id, tolerance=None):
 
 
 def IsCurveClosed(object_id):
-    curve = rhutil.coercecurve(object_id, -1, True)
-    return curve.IsClosed
+    curve = rhutil.coercecurve(object_id)
+    return None if not curve else curve.IsClosed
 
 
 def IsCurveInPlane(object_id, plane=None):
@@ -2461,3 +2469,31 @@ def TrimCurve(curve_id, interval, delete_input=True):
         scriptcontext.doc.Objects.Delete(id, True)
     scriptcontext.doc.Views.Redraw()
     return rc
+
+
+def ChangeCurveDegree(object_id, degree):
+  """Changes the degree of a curve object. For more information see the Rhino help file for the ChangeDegree command.
+  Parameters:
+    object_id = the object's identifier.
+    degree =  the new degree.
+  Returns:
+  Boolean
+   True of False indicating success or failure.
+   None on failure
+  """ 
+  curve = rhutil.coercerhinoobject(object_id)
+  if not curve: return None
+  if not isinstance(curve, Rhino.DocObjects.CurveObject): return None
+
+  curve = curve.CurveGeometry
+  if not isinstance(curve, Rhino.Geometry.NurbsCurve):
+    curve = curve.ToNurbsCurve()
+
+  max_nurbs_degree = 11
+  if degree < 1 or degree > max_nurbs_degree or curve.Degree == degree:
+    return None
+
+  r = False
+  if curve.IncreaseDegree(degree):
+    r = scriptcontext.doc.Objects.Replace(object_id, curve)
+  return r

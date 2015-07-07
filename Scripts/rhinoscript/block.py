@@ -40,12 +40,16 @@ def AddBlock(object_ids, base_point, name=None, delete_input=False):
     if objects:
         geometry = [obj.Geometry for obj in objects]
         attrs = [obj.Attributes for obj in objects]
-        rc = scriptcontext.doc.InstanceDefinitions.Add(name, "", base_point, geometry, attrs)
+        rc = 0
+        if found:
+          rc = scriptcontext.doc.InstanceDefinitions.ModifyGeometry(found.Index, geometry, attrs)
+        else:
+          rc = scriptcontext.doc.InstanceDefinitions.Add(name, "", base_point, geometry, attrs)
         if rc>=0:
             if delete_input:
                 for obj in objects: scriptcontext.doc.Objects.Delete(obj, True)
             scriptcontext.doc.Views.Redraw()
-            return name
+    return name
 
 
 def BlockContainerCount(block_name):
@@ -228,20 +232,20 @@ def DeleteBlock(block_name):
     return rc
 
 
-def ExplodeBlockInstance(object_id):
+def ExplodeBlockInstance(object_id, explode_nested_instances=False):
     """Explodes a block instance into it's geometric components. The
     exploded objects are added to the document
     Parameters:
       object_id = The identifier of an existing block insertion object  
+      explode_nested_instances = By default nested blocks are not exploded.
     Returns:
       identifiers for the newly exploded objects on success
     """
     instance = __InstanceObjectFromId(object_id, True)
-    rc = scriptcontext.doc.Objects.AddExplodedInstancePieces(instance)
-    if rc:
-        scriptcontext.doc.Objects.Delete(instance, True)
-        scriptcontext.doc.Views.Redraw()
-        return rc
+    guids = scriptcontext.doc.Objects.AddExplodedInstancePieces(instance, explodeNestedInstances=explode_nested_instances, deleteInstance=True)
+    if guids:
+      scriptcontext.doc.Views.Redraw()
+    return guids
 
 
 def InsertBlock( block_name, insertion_point, scale=(1,1,1), angle_degrees=0, rotation_normal=(0,0,1) ):

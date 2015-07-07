@@ -4,6 +4,7 @@ import Rhino
 import System.Guid
 import utility as rhutil
 import object as rhobject
+from System.Collections.Generic import List
 
 def AddBox(corners):
     """Adds a box shaped polysurface to the document
@@ -197,6 +198,64 @@ def AddNurbsSurface(point_count, points, knots_u, knots_v, degree, weights=None)
     if id==System.Guid.Empty: return scriptcontext.errorhandler()
     scriptcontext.doc.Views.Redraw()
     return id
+
+def AddPatch(object_ids, uv_spans_tuple_OR_surface_object_id, tolerance=None, trim=True, point_spacing=0.1, flexibility=1.0, surface_pull=1.0, fix_edges=False):
+    """Fits a surface through curve, point, point cloud, and mesh objects.
+    Parameters:
+      object_ids = a list of object identifiers that indicate the objects to use for the patch fitting. 
+          Acceptable object types include curves, points, point clouds, and meshes.
+      uv_spans_tuple_OR_surface_object_id =  the U and V direction span counts for the automatically generated surface OR 
+          The identifier of the starting surface.  It is best if you create a starting surface that is similar in shape 
+          to the surface you are trying to create.
+      tolerance[opt] = The tolerance used by input analysis functions. If omitted, Rhino's document absolute tolerance is used.
+      trim[opt] = Try to find an outside curve and trims the surface to it.  The default value is True.
+      point_spacing[opt] = The basic distance between points sampled from input curves.  The default value is 0.1.
+      flexibility[opt] = Determines the behavior of the surface in areas where its not otherwise controlled by the input.
+          Lower numbers make the surface behave more like a stiff material, higher, more like a flexible material.  
+          That is, each span is made to more closely match the spans adjacent to it if there is no input geometry 
+          mapping to that area of the surface when the flexibility value is low.  The scale is logarithmic.  
+          For example, numbers around 0.001 or 0.1 make the patch pretty stiff and numbers around 10 or 100 
+          make the surface flexible.  The default value is 1.0.
+      surface_pull[opt] = Similar to stiffness, but applies to the starting surface. The bigger the pull, the closer 
+          the resulting surface shape will be to the starting surface.  The default value is 1.0.
+      fix_edges[opt] = Clamps the edges of the starting surface in place. This option is useful if you are using a 
+          curve or points for deforming an existing surface, and you do not want the edges of the starting surface 
+          to move.  The default if False.
+    Returns:
+      Identifier of the new surface object if successful.
+      None on error.
+    """
+    # System.Collections.List instead of Python list because IronPython is
+    # having problems converting a list to an IEnumerable<GeometryBase> which
+    # is the 1st argument for Brep.CreatePatch
+    geometry = List[Rhino.Geometry.GeometryBase]()
+    u_span = 10
+    v_span = 10
+    rc = None
+    id = rhutil.coerceguid(object_ids, False)
+    if id: object_ids = [id]
+    for object_id in object_ids:
+        rhobj = rhutil.coercerhinoobject(object_id, False, False)
+        if not rhobj: return None
+        geometry.Add( rhobj.Geometry )
+    if not geometry: return None
+    
+    surface = None
+    if uv_spans_tuple_OR_surface_object_id:
+      if type(uv_spans_tuple_OR_surface_object_id) is tuple:
+        u_span = uv_spans_tuple_OR_surface_object_id[0]
+        v_span = uv_spans_tuple_OR_surface_object_id[1]
+      else:
+        surface = rhutil.coercesurface(uv_spans_tuple_OR_surface_object_id, False)
+
+    if not tolerance: tolerance = scriptcontext.doc.ModelAbsoluteTolerance
+    b = System.Array.CreateInstance(bool, 4)
+    for i in range(4): b[i] = fix_edges
+    brep = Rhino.Geometry.Brep.CreatePatch(geometry, surface, u_span, v_span, trim, False, point_spacing, flexibility, surface_pull, b, tolerance)
+    if brep:
+      rc = scriptcontext.doc.Objects.AddBrep(brep)
+      scriptcontext.doc.Views.Redraw()
+    return rc
 
 
 def AddPipe(curve_id, parameters, radii, blend_type=0, cap=0, fit=False):
@@ -435,9 +494,9 @@ def AddSrfControlPtGrid(count, points, degree=(3,3)):
 
 
 def AddSrfPt(points):
-    """Creates a new surface from either 3 or 4 control points.
+    """Creates a new surface from either 3 or 4 corner points.
     Parameters:
-      points = list of either 3 or 4 control points
+      points = list of either 3 or 4 corner points
     Returns
       The identifier of the new object if successful.
       None if not successful, or on error.
@@ -535,7 +594,7 @@ def AddTorus(base, major_radius, minor_radius, direction=None):
         baseplane = rhutil.coerceplane(base, True)
         if direction!=None: return scriptcontext.errorhandler()
     if baseplane is None:
-        direction = rhutil.coerce3dpoint(direction, True)
+        direction = rhutil.coerce3dpoint(direction, False)
         if direction: direction = direction-basepoint
         else: direction = Rhino.Geometry.Vector3d.ZAxis
         baseplane = Rhino.Geometry.Plane(basepoint, direction)
@@ -708,16 +767,20 @@ def DuplicateEdgeCurves(object_id, select=False):
     return curves
 
 
-def DuplicateSurfaceBorder(surface_id):
-    """Creates a curve that duplicates a surface or polysurface border
+def DuplicateSurfaceBorder(surface_id, type=0):
+    """Create curves that duplicate a surface or polysurface border
     Parameters:
       surface_id = identifier of a surface
+      type[opt] = the border curves to return (0=both exterior and interior,
+          1=exterior, 2=interior
     Returns:
       list of curve ids on success
       None on error
     """
     brep = rhutil.coercebrep(surface_id, True)
-    curves = brep.DuplicateEdgeCurves(True)
+    inner = type==0 or type==2
+    outer = type==0 or type==1
+    curves = brep.DuplicateNakedEdgeCurves(outer, inner)
     if curves is None: return scriptcontext.errorhandler()
     tolerance = scriptcontext.doc.ModelAbsoluteTolerance * 2.1
     curves = Rhino.Geometry.Curve.JoinCurves(curves, tolerance)
@@ -935,8 +998,9 @@ def FilletSurfaces(surface0, surface1, radius, uvparam0=None, uvparam1=None):
     """
     surface0 = rhutil.coercesurface(surface0, True)
     surface1 = rhutil.coercesurface(surface1, True)
-    uvparam0 = rhutil.coerce2dpoint(uvparam0, True)
-    uvparam1 = rhutil.coerce2dpoint(uvparam1, True)
+    if uvparam0 is not None and uvparam1 is not None:   #SR9 error: "Could not convert None to a Point2d"
+        uvparam0 = rhutil.coerce2dpoint(uvparam0, True)
+        uvparam1 = rhutil.coerce2dpoint(uvparam1, True)
     surfaces = None
     tol = scriptcontext.doc.ModelAbsoluteTolerance
     if uvparam0 and uvparam1:
@@ -972,42 +1036,6 @@ def FlipSurface(surface_id, flip=None):
         if surface_id: scriptcontext.doc.Objects.Replace(surface_id, brep)
         scriptcontext.doc.Views.Redraw()
     return old_reverse
-
-
-def ReverseSurface(surface_id, direction):
-    """Reverses U or V directions of a surface, or swaps (transposes) U and V directions.
-    Note, unlike the RhinoScript version, this function only works on untrimmed surfaces.
-    Parameters:
-      surface_id = identifier of a surfaceobject
-      direction
-        1 = reverse U, 2 = reverse V, 4 = transpose U and V (values can be combined)
-    Returns:
-      Boolean indicating success or failure
-      None on error
-    """
-    brep = rhutil.coercebrep(surface_id, True)
-    if not brep.IsSurface: return scriptcontext.errorhandler()
-    if direction == 0: return True
-    flipped = brep.Faces[0].OrientationIsReversed
-    face = brep.Faces[0].UnderlyingSurface()
-    if direction & 1:
-        face = face.Reverse(0)
-        flipped = not flipped
-        if not face: return False
-    if direction & 2:
-        face = face.Reverse(1)
-        flipped = not flipped
-        if not face: return False
-    if direction & 4:
-        face = face.Transpose()
-        flipped = not flipped
-        if not face: return False
-    newbrep = Rhino.Geometry.Brep.TryConvertBrep(face)
-    if not newbrep: return scriptcontext.errorhandler()
-    if flipped: newbrep.Flip()
-    scriptcontext.doc.Objects.Replace(surface_id, newbrep)
-    scriptcontext.doc.Views.Redraw()
-    return True
 
 
 def IntersectBreps(brep1, brep2, tolerance=None):
@@ -1356,7 +1384,7 @@ def OffsetSurface(surface_id, distance, tolerance=None, both_sides=False, create
     """
     brep = rhutil.coercebrep(surface_id, True)
     face = None
-    if brep.Faces.Count == 1: face = brep.Faces[0]
+    if (1 == brep.Faces.Count): face = brep.Faces[0]
     if face is None: return scriptcontext.errorhandler()
     if tolerance is None: tolerance = scriptcontext.doc.ModelAbsoluteTolerance
     newbrep = Rhino.Geometry.Brep.CreateFromOffsetFace(face, distance, tolerance, both_sides, create_solid)
@@ -1407,6 +1435,31 @@ def RebuildSurface(object_id, degree=(3,3), pointcount=(10,10)):
     rc = scriptcontext.doc.Objects.Replace(object_id, newsurf)
     if rc: scriptcontext.doc.Views.Redraw()
     return rc
+
+
+def ReverseSurface(surface_id, direction):
+    """Reverses U or V directions of a surface, or swaps (transposes) U and V
+    directions.
+    Parameters:
+      surface_id = identifier of a surface object
+      direction
+        1 = reverse U, 2 = reverse V, 4 = transpose U and V (values can be combined)
+    Returns:
+      Boolean indicating success or failure
+      None on error
+    """
+    brep = rhutil.coercebrep(surface_id, True)
+    if not brep.Faces.Count==1: return scriptcontext.errorhandler()
+    face = brep.Faces[0]
+    if direction & 1:
+        face.Reverse(0, True)
+    if direction & 2:
+        face.Reverse(1, True)
+    if direction & 4:
+        face.Transpose(True)
+    scriptcontext.doc.Objects.Replace(surface_id, brep)
+    scriptcontext.doc.Views.Redraw()
+    return True
 
 
 def ShootRay(surface_ids, start_point, direction, reflections=10):
@@ -2002,7 +2055,7 @@ def TrimBrep(object_id, cutter, tolerance=None):
     breps = brep.Trim(cutter, tolerance)
     rhobj = rhutil.coercerhinoobject(object_id)
     if rhobj:
-        attr = rhobj.Attributes
+        attr = rhobj.Attributes if scriptcontext.id == 1 else None #no attributes in gh
         rc = []
         for i in range(len(breps)):
             if i==0:
@@ -2020,8 +2073,9 @@ def TrimSurface( surface_id, direction, interval, delete_input=False):
     """Remove portions of the surface outside of the specified interval
     Parameters:
       surface_id = surface identifier
-      direction = 0 or 1 (U or V)
-      interval = interval of the surface to keep
+      direction = 0(U), 1(V), or 2(U and V)
+      interval = interval of the surface to keep.
+        If both U and V then a list or tuple of 2 intervals
       delete_input [opt] = should the input surface be deleted
     Returns:
       new surface identifier on success
@@ -2032,9 +2086,14 @@ def TrimSurface( surface_id, direction, interval, delete_input=False):
     if direction==0:
         u[0] = interval[0]
         u[1] = interval[1]
-    else:
+    elif direction==1:
         v[0] = interval[0]
         v[1] = interval[1]
+    else:
+        u[0] = interval[0][0]
+        u[1] = interval[0][1]
+        v[0] = interval[1][0]
+        v[1] = interval[1][1]
     new_surface = surface.Trim(u,v)
     if new_surface:
         rc = scriptcontext.doc.Objects.AddSurface(new_surface)
@@ -2083,3 +2142,35 @@ def UnrollSurface(surface_id, explode=False, following_geometry=None, absolute_t
     scriptcontext.doc.Views.Redraw()
     if following_geometry: return rc, new_following
     return rc
+
+
+def ChangeSurfaceDegree(object_id, degree):
+  """Changes the degree of a surface object.  For more information see the Rhino help file for the ChangeDegree command.
+  Parameters:
+    object_id = the object's identifier.
+    degree = list, of two integers, specifying the degrees for the U  V directions
+  Returns:
+    True of False indicating success or failure.
+    None on failure.
+  """
+  object = rhutil.coercerhinoobject(object_id)
+  if not object: return None
+  obj_ref = Rhino.DocObjects.ObjRef(object)
+  
+  surface = obj_ref.Surface()
+  if not surface: return None
+
+  if not isinstance(surface, Rhino.Geometry.NurbsSurface):
+    surface = surface.ToNurbsSurface() # could be a Surface or BrepFace
+
+  max_nurbs_degree = 11
+  if degree[0] < 1 or degree[0] > max_nurbs_degree or \
+      degree[1] < 1 or degree[1] > max_nurbs_degree or \
+      (surface.Degree(0) == degree[0] and surface.Degree(1) == degree[1]):
+    return None
+
+  r = False
+  if surface.IncreaseDegreeU(degree[0]):
+    if surface.IncreaseDegreeV(degree[1]):
+      r = scriptcontext.doc.Objects.Replace(object_id, surface)
+  return r

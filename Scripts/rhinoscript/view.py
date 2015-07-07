@@ -807,7 +807,7 @@ def ViewNearCorners(view=None):
     """
     view = __viewhelper(view)
     rc = view.ActiveViewport.GetNearRect()
-    return rc[0], rc[1], rc[2], rc[3]
+    return rc[0], rc[1], rc[3], rc[2]
 
 
 def ViewProjection(view=None, mode=None):
@@ -830,12 +830,16 @@ def ViewProjection(view=None, mode=None):
     view.Redraw()
     return rc
 
-def ViewRadius(view=None, radius=None):
+def ViewRadius(view=None, radius=None, mode=False):
     """Returns or sets the radius of a parallel-projected view. Useful
     when you need an absolute zoom factor for a parallel-projected view
     Parameters:
       view:[opt] title or id of the view. If omitted, current active view is used
       radius:[opt] the view radius
+      mode: [opt] perform a "dolly" magnification by moving the camera 
+        towards/away from the target so that the amount of the screen 
+        subtended by an object changes.  true = perform a "zoom" 
+        magnification by adjusting the "lens" angle
     Returns:
       if radius is not specified, the current view radius for the specified view
       if radius is specified, the previous view radius for the specified view
@@ -850,7 +854,7 @@ def ViewRadius(view=None, radius=None):
     if radius is None: return old_radius
     magnification_factor = radius / old_radius
     d = 1.0 / magnification_factor
-    viewport.Magnify(d)
+    viewport.Magnify(d, mode)
     view.Redraw()
     return old_radius
 
@@ -865,6 +869,13 @@ def ViewSize(view=None):
     view = __viewhelper(view)
     cr = view.ClientRectangle
     return cr.Width, cr.Height
+
+
+def ViewSpeedTest(view=None, frames=100, freeze=True, direction=0, angle_degrees=5):
+    """Test's Rhino's display performance"""
+    view = __viewhelper(view)
+    angle_radians = math.radians(angle_degrees)
+    return view.SpeedTest(frames, freeze, direction, angle_radians)
 
 
 def ViewTarget(view=None, target=None):
