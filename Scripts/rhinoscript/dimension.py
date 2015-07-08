@@ -1,4 +1,3 @@
-<<<<<<< HEAD:scripts/rhinoscript/dimension.py
 import scriptcontext
 import utility as rhutil
 import Rhino
